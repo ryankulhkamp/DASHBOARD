@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dashboard – Ações mais rentáveis e previsão de alta</title>
+<!-- Chart.js: biblioteca que desenha os gráficos dentro de um <canvas> -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<style>
+  :root { --fundo:#0f172a; --card:#1e293b; --verde:#22c55e; --azul:#3b82f6; --texto:#e2e8f0; --suave:#94a3b8; --linha:#334155; --vermelho:#f87171; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; font-family:system-ui,sans-serif; background:var(--fundo); color:var(--texto); }
+  h1 { margin:0 0 8px; font-size:1.6rem; }
+  h2 { margin:0 0 12px; font-size:1.05rem; }
+  /* Aviso fixo no topo: os dados são inventados */
+  .aviso { display:inline-block; padding:6px 12px; border:1px solid var(--azul); border-radius:8px; color:var(--azul); font-weight:600; font-size:.9rem; }
+  .sub { color:var(--suave); margin:10px 0 20px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; min-width:0; }
+  /* Grades responsivas: auto-fit encaixa quantos cartões couberem na largura */
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }
+  .graficos { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); gap:16px; margin-top:16px; }
+  .kpi small { color:var(--suave); display:block; }
+  .kpi span { display:block; font-size:2rem; font-weight:700; color:var(--verde); margin-top:6px; }
+  .kpi.azul span { color:var(--azul); }
+  .kpi em { font-style:normal; color:var(--suave); font-size:.9rem; }
+  .caixa { position:relative; height:480px; overflow-y:auto; }       /* barras: rolagem interna */
+  .caixa.scatter { height:480px; overflow:hidden; }
+  .tabela { margin-top:16px; overflow-x:auto; }                      /* tabela rola de lado no celular */
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--linha); white-space:nowrap; }
+  th { color:var(--suave); font-weight:600; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pos { color:var(--verde); } .neg { color:var(--vermelho); }
+</style>
+</head>
+<body>
+  <h1>📈 Ações: rentabilidade e potencial de alta</h1>
+  <div class="aviso">Dados fictícios para fins didáticos</div>
+  <p class="sub">Quais ações renderam mais nos últimos 12 meses e quais têm maior potencial de valorização previsto?</p>
+
+  <!-- 3) KPIs: respondem "como estamos?" (preenchidos pelo JavaScript) -->
+  <div class="kpis">
+    <div class="card kpi"><small>Ação mais rentável (12 meses)</small><span id="kpiRent">–</span><em id="kpiRentTick"></em></div>
+    <div class="card kpi azul"><small>Maior previsão de alta</small><span id="kpiPrev">–</span><em id="kpiPrevTick"></em></div>
+    <div class="card kpi"><small>Valorização média prevista do mercado</small><span id="kpiMedia">–</span><em>média das 30 ações</em></div>
+  </div>
+
+  <!-- 4) Gráficos: respondem "onde?" e "por quê?" -->
+  <div class="graficos">
+    <div class="card"><h2>Quais são as ações mais rentáveis até o momento?</h2>
+      <div class="caixa"><div id="boxBarras" style="position:relative"><canvas id="graficoBarras"></canvas></div></div></div>
+    <div class="card"><h2>O preço atual tem relação com o potencial de valorização?</h2>
+      <div class="caixa scatter"><canvas id="graficoDispersao"></canvas></div></div>
+  </div>
+
+  <!-- Tabela completa com os dados -->
+  <div class="card tabela">
+    <h2>Tabela completa dos dados (fictícios)</h2>
+    <table>
+      <thead><tr><th>Ação</th><th>Setor</th><th style="text-align:right">Preço atual (R$)</th><th style="text-align:right">Rentab. 12M (%)</th><th style="text-align:right">Previsão de alta (%)</th></tr></thead>
+      <tbody id="corpoTabela"></tbody>
+    </table>
+  </div>
+
+<script>
+// ===== 1) DADOS =====
+// Cada objeto é uma linha da planilha. Todos os valores são INVENTADOS.
+const acoes = [
+  { acao:"PETR4",  setor:"Petróleo",    preco:38.40,  rent:24.5,  prev:12.0 },
+  { acao:"VALE3",  setor:"Mineração",   preco:62.10,  rent:-8.3,  prev:18.5 },
+  { acao:"ITUB4",  setor:"Bancos",      preco:34.80,  rent:21.7,  prev:9.5 },
+  { acao:"BBDC4",  setor:"Bancos",      preco:14.20,  rent:-12.4, prev:15.2 },
+  { acao:"ABEV3",  setor:"Bebidas",     preco:12.90,  rent:3.1,   prev:7.8 },
+  { acao:"WEGE3",  setor:"Industrial",  preco:48.60,  rent:32.8,  prev:10.4 },
+  { acao:"RENT3",  setor:"Serviços",    preco:44.30,  rent:-5.6,  prev:22.1 },
+  { acao:"MGLU3",  setor:"Varejo",      preco:9.75,   rent:68.9,  prev:35.6 },
+  { acao:"LREN3",  setor:"Varejo",      preco:16.50,  rent:-18.2, prev:27.3 },
+  { acao:"SUZB3",  setor:"Papel",       preco:52.70,  rent:14.9,  prev:11.7 },
+  { acao:"JBSS3",  setor:"Alimentos",   preco:31.20,  rent:41.3,  prev:13.9 },
+  { acao:"BBAS3",  setor:"Bancos",      preco:27.60,  rent:19.4,  prev:8.6 },
+  { acao:"B3SA3",  setor:"Financeiro",  preco:11.40,  rent:-3.8,  prev:16.8 },
+  { acao:"RADL3",  setor:"Saúde",       preco:26.90,  rent:9.2,   prev:12.5 },
+  { acao:"EQTL3",  setor:"Energia",     preco:33.10,  rent:17.6,  prev:9.9 },
+  { acao:"CSAN3",  setor:"Combustíveis",preco:7.85,   rent:-27.5, prev:41.2 },
+  { acao:"GGBR4",  setor:"Siderurgia",  preco:19.30,  rent:-9.1,  prev:19.4 },
+  { acao:"PRIO3",  setor:"Petróleo",    preco:46.80,  rent:28.2,  prev:14.6 },
+  { acao:"RAIL3",  setor:"Logística",   preco:17.20,  rent:6.4,   prev:17.1 },
+  { acao:"ELET3",  setor:"Energia",     preco:41.50,  rent:22.9,  prev:6.7 },
+  { acao:"SBSP3",  setor:"Saneamento",  preco:128.40, rent:52.6,  prev:5.8 },
+  { acao:"CMIG4",  setor:"Energia",     preco:10.60,  rent:11.8,  prev:10.2 },
+  { acao:"HAPV3",  setor:"Saúde",       preco:3.45,   rent:-44.7, prev:58.9 },
+  { acao:"RDOR3",  setor:"Saúde",       preco:29.70,  rent:-1.9,  prev:20.8 },
+  { acao:"TOTS3",  setor:"Tecnologia",  preco:36.20,  rent:15.3,  prev:13.1 },
+  { acao:"CPLE6",  setor:"Energia",     preco:9.20,   rent:30.4,  prev:8.9 },
+  { acao:"VIVT3",  setor:"Telecom",     preco:51.90,  rent:12.7,  prev:7.2 },
+  { acao:"KLBN11", setor:"Papel",       preco:21.50,  rent:4.5,   prev:12.8 },
+  { acao:"CYRE3",  setor:"Construção",  preco:23.80,  rent:37.1,  prev:15.7 },
+  { acao:"BRFS3",  setor:"Alimentos",   preco:22.60,  rent:46.2,  prev:6.3 }
+];
+
+// ===== 2) PROCESSAMENTO / REGRAS =====
+// Ordena do maior para o menor retorno (cópia da lista, para não bagunçar a original)
+const porRent = [...acoes].sort((a, b) => b.rent - a.rent);
+const maisRentavel = porRent[0];                         // primeira da lista ordenada
+
+// Maior previsão de alta: reduce compara duas a duas e fica com a maior
+const maiorPrev = acoes.reduce((a, b) => (b.prev > a.prev ? b : a));
+
+// Média = soma das previsões ÷ quantidade de ações (o 0 é o valor inicial da soma)
+const mediaPrev = acoes.reduce((soma, x) => soma + x.prev, 0) / acoes.length;
+
+// Formata número no padrão brasileiro: 12,5
+const fmt = (n, c = 1) => n.toFixed(c).replace(".", ",");
+
+// ===== 3) KPIs =====
+document.getElementById("kpiRent").textContent = "+" + fmt(maisRentavel.rent) + "%";
+document.getElementById("kpiRentTick").textContent = maisRentavel.acao + " · " + maisRentavel.setor;
+document.getElementById("kpiPrev").textContent = "+" + fmt(maiorPrev.prev) + "%";
+document.getElementById("kpiPrevTick").textContent = maiorPrev.acao + " · " + maiorPrev.setor;
+document.getElementById("kpiMedia").textContent = "+" + fmt(mediaPrev) + "%";
+
+// Tabela completa (mesma ordem dos dados originais)
+document.getElementById("corpoTabela").innerHTML = acoes.map(x =>
+  `<tr><td><b>${x.acao}</b></td><td>${x.setor}</td>
+   <td class="num">${fmt(x.preco, 2)}</td>
+   <td class="num ${x.rent >= 0 ? "pos" : "neg"}">${fmt(x.rent)}</td>
+   <td class="num">${fmt(x.prev)}</td></tr>`).join("");
+
+// ===== 4) GRÁFICOS =====
+Chart.defaults.color = "#e2e8f0";
+Chart.defaults.borderColor = "#334155";
+
+// Gráfico 1: barras horizontais (indexAxis "y"), já ordenadas do maior para o menor.
+// Verde = retorno positivo, vermelho = retorno negativo.
+document.getElementById("boxBarras").style.height = (porRent.length * 24 + 60) + "px"; // altura proporcional
+new Chart(document.getElementById("graficoBarras"), {
+  type: "bar",
+  data: {
+    labels: porRent.map(x => x.acao),
+    datasets: [{
+      label: "Rentabilidade 12M (%)",
+      data: porRent.map(x => x.rent),
+      backgroundColor: porRent.map(x => x.rent >= 0 ? "#22c55e" : "#f87171")
+    }]
+  },
+  options: {
+    indexAxis: "y",
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { x: { title: { display: true, text: "Retorno em 12 meses (%)" } } }
+  }
+});
+
+// Gráfico 2: dispersão. Cada ponto é uma ação: X = preço atual, Y = previsão de alta.
+new Chart(document.getElementById("graficoDispersao"), {
+  type: "scatter",
+  data: {
+    datasets: [{
+      label: "Ações",
+      data: acoes.map(x => ({ x: x.preco, y: x.prev, acao: x.acao })),
+      backgroundColor: "#3b82f6",
+      pointRadius: 6
+    }]
+  },
+  options: {
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      // Ao passar o mouse/dedo, mostra o código da ação
+      tooltip: { callbacks: { label: c => `${c.raw.acao}: R$ ${fmt(c.raw.x, 2)} → +${fmt(c.raw.y)}%` } }
+    },
+    scales: {
+      x: { title: { display: true, text: "Preço atual (R$)" } },
+      y: { title: { display: true, text: "Previsão de alta (%)" } }
+    }
+  }
+});
+</script>
+</body>
+</html>
